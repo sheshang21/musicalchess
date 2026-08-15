@@ -25,7 +25,10 @@ spotifyRouter.post('/spotify/token', async (req, res) => {
   });
 
   const data = await resp.json();
-  if (!resp.ok) return res.status(resp.status).json(data);
+  if (!resp.ok) {
+    console.error('Spotify token exchange failed:', resp.status, data);
+    return res.status(resp.status).json(data);
+  }
 
   // access_token, refresh_token, expires_in returned to the frontend,
   // which holds them client-side for that player's own SDK/API calls.
