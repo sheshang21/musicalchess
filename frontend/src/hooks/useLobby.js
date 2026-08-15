@@ -4,14 +4,17 @@ export function useLobby(playerId) {
   const [status, setStatus] = useState('idle'); // idle | waiting | matched | error
   const [errorDetail, setErrorDetail] = useState('');
   const wsRef = useRef(null);
+  const retriedRef = useRef(false);
 
-  const findMatch = useCallback(
+  const connect = useCallback(
     (onMatched) => {
       const backendUrl = import.meta.env.VITE_BACKEND_URL.replace(/^http/, 'ws').replace(/\/$/, '');
       const ws = new WebSocket(`${backendUrl}/lobby?player_id=${playerId}`);
       wsRef.current = ws;
       setStatus('waiting');
-      setErrorDetail('');
+
+      let openedOk = false;
+      ws.onopen = () => { openedOk = true; };
 
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
@@ -25,25 +28,39 @@ export function useLobby(playerId) {
       };
 
       ws.onerror = () => {
-        // Fires on connection failures (wrong URL, server down, etc).
         console.error('lobby ws error');
       };
 
       ws.onclose = (event) => {
-        // Log the real reason -- 1000 is a normal close, anything else
-        // (1006 especially) means the connection dropped unexpectedly.
         console.log('lobby ws closed', event.code, event.reason);
-        setStatus((s) => {
-          if (s === 'matched') return s;
-          if (event.code !== 1000) {
-            setErrorDetail(`connection closed (${event.code}) -- check backend logs`);
-            return 'error';
-          }
-          return 'idle';
-        });
+        if (event.code === 1000) {
+          setStatus('idle');
+          return;
+        }
+
+        // Handshake never completed and we haven't retried yet -- likely
+        // a cold-start hiccup (e.g. a sleeping free-tier instance waking
+        // up). Retry once automatically before bothering the user.
+        if (!openedOk && !retriedRef.current) {
+          retriedRef.current = true;
+          setTimeout(() => connect(onMatched), 1500);
+          return;
+        }
+
+        setErrorDetail(`connection closed (${event.code}) -- check backend logs`);
+        setStatus('error');
       };
     },
     [playerId]
+  );
+
+  const findMatch = useCallback(
+    (onMatched) => {
+      setErrorDetail('');
+      retriedRef.current = false;
+      connect(onMatched);
+    },
+    [connect]
   );
 
   const cancel = useCallback(() => {
