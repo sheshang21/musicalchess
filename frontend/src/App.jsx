@@ -2,7 +2,10 @@ import { useState } from 'react';
 import Board from './components/Board.jsx';
 import PlaylistPanel from './components/PlaylistPanel.jsx';
 import Chat from './components/Chat.jsx';
+import Callback from './components/Callback.jsx';
 import { useRoomSocket } from './hooks/useRoomSocket.js';
+import { useLobby } from './hooks/useLobby.js';
+import { getAuthUrl, isSpotifyConnected } from './lib/spotify.js';
 import './styles.css';
 
 // TODO: replace with real auth -- for now, a stable per-browser id plus
@@ -30,8 +33,12 @@ export default function App() {
   const [handle, setHandle] = useState(getHandle);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(handle);
+  const [spotifyConnected, setSpotifyConnected] = useState(isSpotifyConnected());
   const playerId = getPlayerId();
   const room = useRoomSocket(roomId, playerId);
+  const lobby = useLobby(playerId);
+
+  if (window.location.pathname === '/callback') return <Callback />;
 
   function saveHandle(next) {
     const clean = next.trim().slice(0, 20) || randomHandle();
@@ -72,9 +79,23 @@ export default function App() {
         <p className="tagline">
           One board, one playlist, two strangers. Whoever's in the room controls both.
         </p>
-        <button onClick={() => setRoomId(prompt('room id'))}>
-          enter room →
-        </button>
+        {lobby.status === 'waiting' ? (
+          <div className="waiting-row">
+            <p className="waiting-text">looking for an opponent…</p>
+            <button onClick={lobby.cancel}>cancel</button>
+          </div>
+        ) : spotifyConnected ? (
+          <button onClick={() => lobby.findMatch(setRoomId)}>
+            play a stranger →
+          </button>
+        ) : (
+          <div>
+            <p className="tagline">connect spotify first — both players need it for the shared queue.</p>
+            <button onClick={() => (window.location.href = getAuthUrl())}>
+              connect spotify →
+            </button>
+          </div>
+        )}
       </div>
     );
   }
