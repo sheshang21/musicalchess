@@ -1,10 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { exchangeCode, saveTokens } from '../lib/spotify.js';
 
 export default function Callback() {
   const [status, setStatus] = useState('working'); // working | done | error
+  const attempted = useRef(false);
 
   useEffect(() => {
+    if (attempted.current) return; // never exchange the same code twice
+    attempted.current = true;
+
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
     const err = params.get('error');
