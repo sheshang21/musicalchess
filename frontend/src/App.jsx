@@ -84,6 +84,11 @@ export default function App() {
             <p className="waiting-text">looking for an opponent…</p>
             <button onClick={lobby.cancel}>cancel</button>
           </div>
+        ) : lobby.status === 'error' ? (
+          <div>
+            <p className="tagline">connection dropped: {lobby.errorDetail}</p>
+            <button onClick={() => lobby.findMatch(setRoomId)}>try again →</button>
+          </div>
         ) : spotifyConnected ? (
           <button onClick={() => lobby.findMatch(setRoomId)}>
             play a stranger →
