@@ -8,7 +8,8 @@ import { attachRoomServer } from './ws/roomServer.js';
 import { attachLobbyServer } from './ws/lobbyServer.js';
 
 const app = express();
-app.use(cors({ origin: process.env.FRONTEND_ORIGIN || '*' }));
+const allowedOrigin = (process.env.FRONTEND_ORIGIN || '*').replace(/\/$/, '');
+app.use(cors({ origin: allowedOrigin }));
 app.use(express.json());
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
