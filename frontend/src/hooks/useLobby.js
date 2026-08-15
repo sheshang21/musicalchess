@@ -7,7 +7,7 @@ export function useLobby(playerId) {
 
   const findMatch = useCallback(
     (onMatched) => {
-      const backendUrl = import.meta.env.VITE_BACKEND_URL.replace(/^http/, 'ws');
+      const backendUrl = import.meta.env.VITE_BACKEND_URL.replace(/^http/, 'ws').replace(/\/$/, '');
       const ws = new WebSocket(`${backendUrl}/lobby?player_id=${playerId}`);
       wsRef.current = ws;
       setStatus('waiting');

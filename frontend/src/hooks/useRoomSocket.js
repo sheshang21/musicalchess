@@ -10,7 +10,7 @@ export function useRoomSocket(roomId, playerId) {
   useEffect(() => {
     if (!roomId || !playerId) return;
 
-    const backendUrl = import.meta.env.VITE_BACKEND_URL.replace(/^http/, 'ws');
+    const backendUrl = import.meta.env.VITE_BACKEND_URL.replace(/^http/, 'ws').replace(/\/$/, '');
     const ws = new WebSocket(`${backendUrl}/ws?room_id=${roomId}&player_id=${playerId}`);
     wsRef.current = ws;
 
