@@ -5,6 +5,7 @@ import { createServer } from 'http';
 import { roomsRouter } from './routes/rooms.js';
 import { spotifyRouter } from './routes/spotify.js';
 import { attachRoomServer } from './ws/roomServer.js';
+import { attachLobbyServer } from './ws/lobbyServer.js';
 
 const app = express();
 app.use(cors({ origin: process.env.FRONTEND_ORIGIN || '*' }));
@@ -16,6 +17,7 @@ app.use('/api', spotifyRouter);
 
 const server = createServer(app);
 attachRoomServer(server); // wires up ws at /ws
+attachLobbyServer(server); // wires up ws at /lobby
 
 const port = process.env.PORT || 3001;
 server.listen(port, () => {
