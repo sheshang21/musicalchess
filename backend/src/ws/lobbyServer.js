@@ -11,8 +11,10 @@ export function attachLobbyServer(server) {
   wss.on('connection', async (ws, req) => {
     const url = new URL(req.url, 'http://localhost');
     const playerId = url.searchParams.get('player_id');
+    console.log('lobby connection:', req.url, 'player:', playerId);
 
     if (!playerId) {
+      console.log('lobby: rejected, no player_id');
       ws.close(4000, 'player_id required');
       return;
     }
