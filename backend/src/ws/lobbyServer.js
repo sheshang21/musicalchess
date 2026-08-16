@@ -1,5 +1,6 @@
 import { WebSocketServer } from 'ws';
 import { supabase } from '../lib/supabase.js';
+import { ensurePlayer } from '../lib/players.js';
 
 // One player waits here until a second player shows up. First-come,
 // first-paired -- no room codes, no manual joining.
@@ -18,6 +19,11 @@ export function attachLobbyServer(server) {
       ws.close(4000, 'player_id required');
       return;
     }
+
+    // Anonymous "accounts" are created lazily on first sight, since
+    // there's no real signup step -- this must happen before this id
+    // can be used as a foreign key anywhere (room, chat, queue).
+    await ensurePlayer(playerId);
 
     if (waiting && waiting.ws.readyState === waiting.ws.OPEN && waiting.playerId !== playerId) {
       // Someone's already here -- pair up and create the room.

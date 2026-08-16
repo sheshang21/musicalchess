@@ -1,5 +1,6 @@
 import { WebSocketServer } from 'ws';
 import { supabase } from '../lib/supabase.js';
+import { ensurePlayer } from '../lib/players.js';
 
 // room_id -> Set of ws connections
 const rooms = new Map();
@@ -37,6 +38,8 @@ export function attachRoomServer(server) {
 
     if (!rooms.has(roomId)) rooms.set(roomId, new Set());
     rooms.get(roomId).add(ws);
+
+    ensurePlayer(playerId);
 
     // Send full current state immediately on connect/reconnect so the
     // client resyncs, no matter how long it was disconnected.
