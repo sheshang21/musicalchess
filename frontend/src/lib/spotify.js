@@ -4,6 +4,8 @@ const SCOPES = [
   'user-read-private',
   'user-modify-playback-state',
   'user-read-playback-state',
+  'playlist-read-private',
+  'playlist-read-collaborative',
 ].join(' ');
 
 export function getAuthUrl() {
@@ -63,6 +65,46 @@ export async function getValidAccessToken() {
   const fresh = await refreshToken(refresh_token);
   saveTokens({ ...fresh, refresh_token: fresh.refresh_token || refresh_token });
   return fresh.access_token;
+}
+
+export async function getMyPlaylists() {
+  const token = await getValidAccessToken();
+  if (!token) throw new Error('not connected to spotify');
+
+  const resp = await fetch('https://api.spotify.com/v1/me/playlists?limit=50', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!resp.ok) throw new Error(`playlists fetch failed (${resp.status})`);
+  const data = await resp.json();
+
+  return data.items.map((p) => ({
+    id: p.id,
+    name: p.name,
+    trackCount: p.tracks.total,
+    public: p.public,
+  }));
+}
+
+export async function getPlaylistTracks(playlistId) {
+  const token = await getValidAccessToken();
+  if (!token) throw new Error('not connected to spotify');
+
+  const resp = await fetch(
+    `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=50`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!resp.ok) throw new Error(`playlist tracks fetch failed (${resp.status})`);
+  const data = await resp.json();
+
+  return data.items
+    .filter((item) => item.track)
+    .map((item) => ({
+      spotify_track_id: item.track.id,
+      uri: item.track.uri,
+      title: item.track.name,
+      artist: item.track.artists.map((a) => a.name).join(', '),
+      duration_ms: item.track.duration_ms,
+    }));
 }
 
 export async function searchTracks(query) {
