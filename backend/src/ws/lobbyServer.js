@@ -31,17 +31,24 @@ export function attachLobbyServer(server) {
         .single();
 
       if (error) {
-        ws.send(JSON.stringify({ type: 'error', message: 'could not create room' }));
+        console.error('lobby: room creation failed:', error);
+        const failMsg = JSON.stringify({ type: 'error', message: 'could not create room' });
+        ws.send(failMsg);
+        if (opponent.ws.readyState === opponent.ws.OPEN) opponent.ws.send(failMsg);
         return;
       }
 
-      await supabase.from('playback_state').insert({ room_id: room.id });
+      const { error: playbackError } = await supabase
+        .from('playback_state')
+        .insert({ room_id: room.id });
+      if (playbackError) console.error('lobby: playback_state insert failed:', playbackError);
 
+      console.log('lobby: matched', opponent.playerId, '+', playerId, '-> room', room.id);
       const payload = JSON.stringify({ type: 'matched', room_id: room.id });
       opponent.ws.send(payload);
       ws.send(payload);
-      opponent.ws.close();
-      ws.close();
+      opponent.ws.close(1000, 'matched');
+      ws.close(1000, 'matched');
     } else {
       // Nobody waiting -- take this spot.
       waiting = { ws, playerId };
