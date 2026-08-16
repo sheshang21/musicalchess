@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase.js';
 let waiting = null; // { ws, playerId } | null
 
 export function attachLobbyServer(server) {
-  const wss = new WebSocketServer({ server, path: '/lobby' });
+  const wss = new WebSocketServer({ noServer: true });
 
   wss.on('connection', async (ws, req) => {
     const url = new URL(req.url, 'http://localhost');
