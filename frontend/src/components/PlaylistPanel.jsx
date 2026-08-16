@@ -1,22 +1,30 @@
 import { useState, useEffect, useRef } from 'react';
-import { searchTracks, loadPlaybackSdk, playUri, pausePlayback } from '../lib/spotify.js';
+import {
+  searchTracks,
+  getMyPlaylists,
+  getPlaylistTracks,
+  loadPlaybackSdk,
+  playUri,
+  pausePlayback,
+} from '../lib/spotify.js';
 
 export default function PlaylistPanel({ queue, playback, addTrack, removeTrack, updatePlayback }) {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
-  const [searching, setSearching] = useState(false);
+  const [browseTracks, setBrowseTracks] = useState([]);
+  const [browseLabel, setBrowseLabel] = useState('');
+  const [myPlaylists, setMyPlaylists] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const deviceRef = useRef(null);
 
   useEffect(() => {
     loadPlaybackSdk()
-      .then(({ deviceId }) => {
-        deviceRef.current = deviceId;
-      })
-      .catch(() => {
-        // Player couldn't initialize -- usually means not connected yet
-        // or a non-Premium account. Queue control still works either way.
-      });
+      .then(({ deviceId }) => { deviceRef.current = deviceId; })
+      .catch((e) => setError(`spotify player unavailable: ${e.message}`));
+
+    getMyPlaylists()
+      .then(setMyPlaylists)
+      .catch((e) => setError(e.message));
   }, []);
 
   // Follow the room's shared playback state: whenever the current track
@@ -27,7 +35,8 @@ export default function PlaylistPanel({ queue, playback, addTrack, removeTrack, 
     if (!track) return;
 
     if (playback.is_playing) {
-      playUri(deviceRef.current, track.uri || `spotify:track:${track.spotify_track_id}`, playback.position_ms);
+      playUri(deviceRef.current, track.uri || `spotify:track:${track.spotify_track_id}`, playback.position_ms)
+        .catch((e) => setError(`playback failed: ${e.message}`));
     } else {
       pausePlayback(deviceRef.current);
     }
@@ -35,19 +44,42 @@ export default function PlaylistPanel({ queue, playback, addTrack, removeTrack, 
 
   async function handleSearch() {
     if (!query.trim()) return;
-    setSearching(true);
+    setLoading(true);
     setError('');
     try {
       const tracks = await searchTracks(query);
-      setResults(tracks);
-    } catch {
-      setError('search failed -- check your spotify connection');
+      setBrowseTracks(tracks);
+      setBrowseLabel(`results for "${query}"`);
+    } catch (e) {
+      setError(e.message);
     } finally {
-      setSearching(false);
+      setLoading(false);
     }
   }
 
-  function playTrack(track) {
+  async function openPlaylist(playlist) {
+    setLoading(true);
+    setError('');
+    try {
+      const tracks = await getPlaylistTracks(playlist.id);
+      setBrowseTracks(tracks);
+      setBrowseLabel(playlist.name);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // One click: add to the shared queue and play it immediately -- no
+  // separate "add" then "play" step.
+  function playNow(track) {
+    addTrack(track, (savedTrack) => {
+      updatePlayback({ current_track_id: savedTrack.id, position_ms: 0, is_playing: true });
+    });
+  }
+
+  function playFromQueue(track) {
     updatePlayback({ current_track_id: track.id, position_ms: 0, is_playing: true });
   }
 
@@ -57,10 +89,10 @@ export default function PlaylistPanel({ queue, playback, addTrack, removeTrack, 
     <div className="panel">
       <p className="panel-label">queue</p>
       {currentTrack && (
-        <p className="now-playing">
-          {currentTrack.title} — {currentTrack.artist}
-        </p>
+        <p className="now-playing">{currentTrack.title} — {currentTrack.artist}</p>
       )}
+      {error && <p className="error-text">{error}</p>}
+
       <div className="add-row">
         <input
           value={query}
@@ -68,28 +100,42 @@ export default function PlaylistPanel({ queue, playback, addTrack, removeTrack, 
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
           placeholder="search a track"
         />
-        <button onClick={handleSearch} disabled={searching}>
-          {searching ? '…' : 'search'}
-        </button>
+        <button onClick={handleSearch} disabled={loading}>{loading ? '…' : 'search'}</button>
       </div>
-      {error && <p className="error-text">{error}</p>}
 
-      {results.length > 0 && (
-        <ul className="queue-list">
-          {results.map((track) => (
-            <li key={track.spotify_track_id}>
-              <span>{track.title} — {track.artist}</span>
-              <button onClick={() => { addTrack(track); setResults([]); setQuery(''); }}>+</button>
-            </li>
-          ))}
-        </ul>
+      {myPlaylists.length > 0 && (
+        <>
+          <p className="panel-label" style={{ marginTop: 16 }}>your playlists</p>
+          <ul className="queue-list">
+            {myPlaylists.map((p) => (
+              <li key={p.id} onClick={() => openPlaylist(p)}>
+                <span>{p.name}</span>
+                <span style={{ color: '#999', fontSize: 11 }}>{p.trackCount}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {browseTracks.length > 0 && (
+        <>
+          <p className="panel-label" style={{ marginTop: 16 }}>{browseLabel}</p>
+          <ul className="queue-list">
+            {browseTracks.map((track) => (
+              <li key={track.spotify_track_id} onClick={() => playNow(track)}>
+                <span>{track.title} — {track.artist}</span>
+                <span style={{ fontSize: 12 }}>▶</span>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
 
       <p className="panel-label" style={{ marginTop: 16 }}>up next</p>
       <ul className="queue-list">
         {queue.map((track) => (
           <li key={track.id}>
-            <span onClick={() => playTrack(track)}>{track.title} — {track.artist}</span>
+            <span onClick={() => playFromQueue(track)}>{track.title} — {track.artist}</span>
             <button onClick={() => removeTrack(track.id)} aria-label="remove">×</button>
           </li>
         ))}
