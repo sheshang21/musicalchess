@@ -6,6 +6,7 @@ export function useRoomSocket(roomId, playerId) {
   const [playback, setPlayback] = useState(null);
   const [chat, setChat] = useState([]);
   const [connected, setConnected] = useState(false);
+  const pendingAdds = useRef(new Map()); // spotify_track_id -> callback
 
   useEffect(() => {
     if (!roomId || !playerId) return;
@@ -28,7 +29,14 @@ export function useRoomSocket(roomId, playerId) {
           break;
         case 'queue:updated':
           setQueue((prev) => {
-            if (msg.track_added) return [...prev, msg.track_added];
+            if (msg.track_added) {
+              const cb = pendingAdds.current.get(msg.track_added.spotify_track_id);
+              if (cb) {
+                cb(msg.track_added);
+                pendingAdds.current.delete(msg.track_added.spotify_track_id);
+              }
+              return [...prev, msg.track_added];
+            }
             if (msg.track_removed) return prev.filter((t) => t.id !== msg.track_removed);
             return prev;
           });
@@ -53,7 +61,15 @@ export function useRoomSocket(roomId, playerId) {
     }
   }, []);
 
-  const addTrack = useCallback((track) => send({ type: 'queue:add', track }), [send]);
+  // onAdded, if given, fires once the server confirms the track was
+  // saved -- used to immediately start playback with its real DB id.
+  const addTrack = useCallback(
+    (track, onAdded) => {
+      if (onAdded) pendingAdds.current.set(track.spotify_track_id, onAdded);
+      send({ type: 'queue:add', track });
+    },
+    [send]
+  );
   const removeTrack = useCallback((trackId) => send({ type: 'queue:remove', track_id: trackId }), [send]);
   const updatePlayback = useCallback(
     (state) => send({ type: 'playback:update', ...state }),
