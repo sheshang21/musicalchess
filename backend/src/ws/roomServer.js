@@ -1,47 +1,130 @@
-import 'dotenv/config';
-import express from 'express';
-import cors from 'cors';
-import { createServer } from 'http';
-import { roomsRouter } from './routes/rooms.js';
-import { spotifyRouter } from './routes/spotify.js';
-import { attachRoomServer } from './ws/roomServer.js';
-import { attachLobbyServer } from './ws/lobbyServer.js';
+import { WebSocketServer } from 'ws';
+import { supabase } from '../lib/supabase.js';
 
-const app = express();
-const allowedOrigin = (process.env.FRONTEND_ORIGIN || '*').replace(/\/$/, '');
-app.use(cors({ origin: allowedOrigin }));
-app.use(express.json());
+// room_id -> Set of ws connections
+const rooms = new Map();
 
-app.get('/health', (_req, res) => res.json({ ok: true }));
-app.use('/api', roomsRouter);
-app.use('/api', spotifyRouter);
-
-const server = createServer(app);
-const roomWss = attachRoomServer(server);
-const lobbyWss = attachLobbyServer(server);
-
-// Both ws servers use noServer mode -- we route each upgrade request to
-// the right one ourselves by pathname. Attaching two `path`-based
-// WebSocketServer instances directly to one http.Server doesn't work:
-// the first one registered aborts every non-matching request with a
-// 400 before the second server ever sees it.
-server.on('upgrade', (req, socket, head) => {
-  const { pathname } = new URL(req.url, 'http://localhost');
-
-  if (pathname === '/ws') {
-    roomWss.handleUpgrade(req, socket, head, (ws) => {
-      roomWss.emit('connection', ws, req);
-    });
-  } else if (pathname === '/lobby') {
-    lobbyWss.handleUpgrade(req, socket, head, (ws) => {
-      lobbyWss.emit('connection', ws, req);
-    });
-  } else {
-    socket.destroy();
+function broadcast(roomId, message) {
+  const conns = rooms.get(roomId);
+  if (!conns) return;
+  const payload = JSON.stringify(message);
+  for (const ws of conns) {
+    if (ws.readyState === ws.OPEN) ws.send(payload);
   }
-});
+}
 
-const port = process.env.PORT || 3001;
-server.listen(port, () => {
-  console.log(`Server listening on ${port}`);
-});
+async function getFullState(roomId) {
+  const [{ data: queue }, { data: playback }, { data: chat }] = await Promise.all([
+    supabase.from('queue_track').select('*').eq('room_id', roomId).order('position'),
+    supabase.from('playback_state').select('*').eq('room_id', roomId).single(),
+    supabase.from('chat_message').select('*').eq('room_id', roomId).order('sent_at').limit(50),
+  ]);
+  return { queue: queue || [], playback: playback || null, chat: chat || [] };
+}
+
+export function attachRoomServer(server) {
+  const wss = new WebSocketServer({ noServer: true });
+
+  wss.on('connection', (ws, req) => {
+    const url = new URL(req.url, 'http://localhost');
+    const roomId = url.searchParams.get('room_id');
+    const playerId = url.searchParams.get('player_id');
+
+    if (!roomId || !playerId) {
+      ws.close(4000, 'room_id and player_id required');
+      return;
+    }
+
+    if (!rooms.has(roomId)) rooms.set(roomId, new Set());
+    rooms.get(roomId).add(ws);
+
+    // Send full current state immediately on connect/reconnect so the
+    // client resyncs, no matter how long it was disconnected.
+    getFullState(roomId).then((state) => {
+      ws.send(JSON.stringify({ type: 'sync', ...state }));
+    });
+
+    ws.on('message', async (raw) => {
+      let msg;
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        return;
+      }
+
+      switch (msg.type) {
+        case 'queue:add': {
+          const { data: existing } = await supabase
+            .from('queue_track')
+            .select('position')
+            .eq('room_id', roomId)
+            .order('position', { ascending: false })
+            .limit(1);
+          const nextPos = existing?.[0] ? existing[0].position + 1 : 0;
+
+          const { data } = await supabase
+            .from('queue_track')
+            .insert({
+              room_id: roomId,
+              spotify_track_id: msg.track.spotify_track_id,
+              title: msg.track.title,
+              artist: msg.track.artist,
+              duration_ms: msg.track.duration_ms,
+              added_by: playerId,
+              position: nextPos,
+            })
+            .select()
+            .single();
+
+          broadcast(roomId, { type: 'queue:updated', track_added: data });
+          break;
+        }
+
+        case 'queue:remove': {
+          await supabase.from('queue_track').delete().eq('id', msg.track_id).eq('room_id', roomId);
+          broadcast(roomId, { type: 'queue:updated', track_removed: msg.track_id });
+          break;
+        }
+
+        case 'playback:update': {
+          // msg: { current_track_id, position_ms, is_playing }
+          const { data } = await supabase
+            .from('playback_state')
+            .update({
+              current_track_id: msg.current_track_id,
+              position_ms: msg.position_ms,
+              is_playing: msg.is_playing,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('room_id', roomId)
+            .select()
+            .single();
+
+          broadcast(roomId, { type: 'playback:updated', playback: data });
+          break;
+        }
+
+        case 'chat:send': {
+          const { data } = await supabase
+            .from('chat_message')
+            .insert({ room_id: roomId, sender_id: playerId, body: msg.body })
+            .select()
+            .single();
+
+          broadcast(roomId, { type: 'chat:new', message: data });
+          break;
+        }
+
+        default:
+          break;
+      }
+    });
+
+    ws.on('close', () => {
+      rooms.get(roomId)?.delete(ws);
+      if (rooms.get(roomId)?.size === 0) rooms.delete(roomId);
+    });
+  });
+
+  return wss;
+}
